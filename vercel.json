@@ -1,7 +1,7 @@
 {
   "version": 2,
-  "buildCommand": "cd frontend && npx vite build --outDir dist",
-  "outputDirectory": "frontend/dist",
+  "buildCommand": "vite build",
+  "outputDirectory": "dist",
   "functions": {
     "api/index.js": {
       "includeFiles": "backend/thanawya.db.gz",

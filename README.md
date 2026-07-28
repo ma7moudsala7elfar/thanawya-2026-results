@@ -1,50 +1,16 @@
-# 🎓 نتيجة الثانوية العامة 2026 - النظام الحديث (الدور الأول)
+# React + Vite
 
-منظومة ويب متكاملة للاستعلام عن نتائج امتحانات الثانوية العامة 2026 في جمهورية مصر العربية، مع حساب الترتيب الوطني على مستوى الجمهورية، والنسبة المئوية الأكاديمية، وقائمة أوائل الثانوية العامة والإحصائيات الشاملة.
+This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
-> ✨ **إهداء خاص من المهندس محمود صلاح الفار لكل طلاب الثانوية العامة مع أطيب تمنياتنا بالنجاح والتوفيق** ✨
+Currently, two official plugins are available:
 
----
+- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
+- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
 
-## 🚀 المميزات الرئيسية
-* **البحث السريع والتلقائي**: بحث فوري برقم الجلوس أو اسم الطالب باللغة العربية مع إمكانية البحث الجزئي والاقتراحات الذكية.
-* **حساب الترتيب الوطني (National Rank)**: تحديد ترتيب الطالب الدقيق على مستوى جميع طلاب الجمهورية (+900,000 طالب).
-* **حساب النسبة المئوية والتفوق (Percentile)**: إظهار نسبة الطلاب التي يتفوق عليها الطالب أكاديمياً.
-* **لوحة أوائل الجمهورية (Leaderboard)**: استعراض أفضل المتفوقين مرتبين تنازلياً حسب الدرجات.
-* **إحصائيات وتحليلات شاملة**: رسوم بيانية تفاعلية لتوزيع الدرجات ونسب النجاح لجميع الفئات.
-* **شهادة قابلة للطباعة والمشاركة**: إمكانية طباعة النتيجة كشهادة PDF رسمية أو مشاركة رابطها.
+## React Compiler
 
----
+The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
 
-## 🛠️ التقنيات المستخدمة
-* **Frontend**: React.js, Vite, Lucide Icons, Canvas Confetti.
-* **Backend**: Express.js, Node.js, SQLite3.
-* **Data Engine**: Python (convert_accdb.py) + SQLite indexing.
-* **Deployment**: Supported out-of-the-box for Vercel & GitHub.
+## Expanding the Oxlint configuration
 
----
-
-## 💻 التشغيل المحلي (Local Setup)
-
-1. **تثبيت المكونات**:
-   ```bash
-   npm install
-   cd frontend && npm install && cd ..
-   ```
-
-2. **تشغيل الخادم المحلي (Backend)**:
-   ```bash
-   node backend/server.js
-   ```
-
-3. **تشغيل واجهة المستخدم (Frontend)**:
-   ```bash
-   cd frontend
-   npm run dev
-   ```
-
----
-
-## ☁️ النشر على GitHub و Vercel
-
-مشروع جاهز ومُصمم للنشر المباشر عبر Vercel مجاناً.
+If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.

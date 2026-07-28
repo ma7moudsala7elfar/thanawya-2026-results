@@ -1,0 +1,5 @@
+*.accdb
+backend/thanawya.db
+backend/thanawya_compact.db
+backend/node_modules
+frontend/node_modules

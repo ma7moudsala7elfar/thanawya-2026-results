@@ -16,7 +16,7 @@ app.use(express.json());
 
 let dbInstance = null;
 
-function initDatabase() {
+function getDatabase() {
     if (dbInstance) return dbInstance;
 
     // Priority 1: local dev DB
@@ -35,22 +35,23 @@ function initDatabase() {
         return dbInstance;
     }
 
-    // Priority 3: Decompress .gz via stream (avoids RAM OOM on 512MB Railway instances)
+    // Priority 3: Pure Node.js Stream Decompress .gz (avoids RAM OOM and works anywhere)
     const gzPath = path.join(__dirname, '..', 'db', 'thanawya.db.gz');
     if (fs.existsSync(gzPath)) {
         console.log('[DB] Streaming decompress thanawya.db.gz to /tmp...');
         try {
-            const { execSync } = require('child_process');
-            execSync(`gzip -d -c "${gzPath}" > "${tmpDbPath}"`);
-            console.log('[DB] Stream decompression complete. File size:', fs.statSync(tmpDbPath).size);
+            const gzBuf = fs.readFileSync(gzPath);
+            const decompressedBuf = zlib.gunzipSync(gzBuf);
+            fs.writeFileSync(tmpDbPath, decompressedBuf);
+            console.log('[DB] Decompression complete. File size:', fs.statSync(tmpDbPath).size);
             dbInstance = new sqlite3.Database(tmpDbPath, sqlite3.OPEN_READONLY);
             return dbInstance;
         } catch (e) {
-            console.error('[DB] Stream decompression failed:', e.message);
+            console.error('[DB] Decompression error:', e.message);
         }
     }
 
-    // Fallback: empty in-memory DB (returns empty results, not crash)
+    // Fallback: empty in-memory DB
     console.error('[DB] WARNING: No DB found — using in-memory empty DB');
     dbInstance = new sqlite3.Database(':memory:');
     dbInstance.run(`CREATE TABLE IF NOT EXISTS students (
@@ -65,7 +66,7 @@ function initDatabase() {
     return dbInstance;
 }
 
-const db = initDatabase();
+const db = getDatabase();
 
 // ─── Arabic Normalization ──────────────────────────────────────────────────────
 
@@ -340,7 +341,7 @@ app.get('/api/stats', (req, res) => {
 
 // ─── Start Server ─────────────────────────────────────────────────────────────
 
-app.listen(PORT, () => {
-    console.log(`[Server] 🚀 Thanawya Backend running on port ${PORT}`);
-    console.log(`[Server] Health check: http://localhost:${PORT}/api/health`);
+app.listen(PORT, '0.0.0.0', () => {
+    console.log(`[Server] 🚀 Thanawya Backend running on 0.0.0.0:${PORT}`);
+    console.log(`[Server] Health check: http://0.0.0.0:${PORT}/api/health`);
 });

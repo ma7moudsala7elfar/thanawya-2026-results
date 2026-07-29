@@ -177,16 +177,23 @@ async function scrapeGomhuriaOnline(seatingNo) {
 
         console.log(`[Scraper] Opening Gomhuria for seating_no: ${key}...`);
         await page.goto('https://natega.gomhuriaonline.com', {
-            waitUntil: 'networkidle2',
-            timeout: 30000
+            waitUntil: 'domcontentloaded',
+            timeout: 20000
         });
 
         await page.waitForSelector('#seat-number', { timeout: 10000 });
         await page.type('#seat-number', key);
 
         await Promise.all([
-            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}),
-            page.click('.inquiry-form__submit')
+            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 25000 }).catch(() => {}),
+            page.evaluate(() => {
+                const btn = document.querySelector('.inquiry-form__submit');
+                if (btn) btn.click();
+                else {
+                    const form = document.querySelector('#inquiry-form') || document.querySelector('form');
+                    if (form) form.submit();
+                }
+            })
         ]);
 
         const html = await page.content();

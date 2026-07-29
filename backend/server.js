@@ -97,9 +97,17 @@ async function getSharedBrowser() {
         }
     }
 
-    // Use env var (set in Docker/Railway) or let Puppeteer find its bundled Chrome
-    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-    console.log('[Puppeteer] Launching Chrome...', executablePath ? `(path: ${executablePath})` : '(auto)');
+    // On Railway Nixpacks or Docker, use system chromium or executablePath from ENV
+    let executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
+    if (!executablePath) {
+        try {
+            const { execSync } = require('child_process');
+            const whichChromium = execSync('which chromium 2>/dev/null || which google-chrome 2>/dev/null').toString().trim();
+            if (whichChromium) executablePath = whichChromium;
+        } catch (_) {}
+    }
+
+    console.log('[Puppeteer] Launching Chrome...', executablePath ? `(path: ${executablePath})` : '(bundled)');
 
     // Dynamic import for ESM-only puppeteer v19+
     const { default: puppeteer } = await import('puppeteer');
@@ -115,11 +123,6 @@ async function getSharedBrowser() {
             '--no-first-run',
             '--no-zygote',
             '--disable-gpu',
-            '--disable-background-networking',
-            '--disable-default-apps',
-            '--disable-extensions',
-            '--disable-sync',
-            '--disable-translate',
             '--mute-audio'
         ]
     });

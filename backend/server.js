@@ -19,12 +19,19 @@ let dbInstance = null;
 function getDatabase() {
     if (dbInstance) return dbInstance;
 
-    // Priority 1: local dev DB
-    const localDbPath = path.join(__dirname, '..', 'db', 'thanawya.db');
-    if (fs.existsSync(localDbPath)) {
-        console.log('[DB] Connected to local thanawya.db at:', localDbPath);
-        dbInstance = new sqlite3.Database(localDbPath, sqlite3.OPEN_READONLY);
-        return dbInstance;
+    const dbCandidates = [
+        path.join(__dirname, '..', 'db', 'thanawya.db'),
+        path.join(__dirname, 'db', 'thanawya.db'),
+        path.join(process.cwd(), 'db', 'thanawya.db'),
+        path.join(process.cwd(), 'thanawya.db')
+    ];
+
+    for (const p of dbCandidates) {
+        if (fs.existsSync(p) && fs.statSync(p).size > 1024) {
+            console.log('[DB] Connected to thanawya.db at:', p);
+            dbInstance = new sqlite3.Database(p, sqlite3.OPEN_READONLY);
+            return dbInstance;
+        }
     }
 
     // Priority 2: Already decompressed in /tmp
@@ -35,19 +42,27 @@ function getDatabase() {
         return dbInstance;
     }
 
-    // Priority 3: Pure Node.js Stream Decompress .gz (avoids RAM OOM and works anywhere)
-    const gzPath = path.join(__dirname, '..', 'db', 'thanawya.db.gz');
-    if (fs.existsSync(gzPath)) {
-        console.log('[DB] Streaming decompress thanawya.db.gz to /tmp...');
-        try {
-            const gzBuf = fs.readFileSync(gzPath);
-            const decompressedBuf = zlib.gunzipSync(gzBuf);
-            fs.writeFileSync(tmpDbPath, decompressedBuf);
-            console.log('[DB] Decompression complete. File size:', fs.statSync(tmpDbPath).size);
-            dbInstance = new sqlite3.Database(tmpDbPath, sqlite3.OPEN_READONLY);
-            return dbInstance;
-        } catch (e) {
-            console.error('[DB] Decompression error:', e.message);
+    // Priority 3: Decompress .gz candidate
+    const gzCandidates = [
+        path.join(__dirname, '..', 'db', 'thanawya.db.gz'),
+        path.join(__dirname, 'db', 'thanawya.db.gz'),
+        path.join(process.cwd(), 'db', 'thanawya.db.gz'),
+        path.join(process.cwd(), 'thanawya.db.gz')
+    ];
+
+    for (const gzPath of gzCandidates) {
+        if (fs.existsSync(gzPath)) {
+            console.log('[DB] Found gz at:', gzPath, 'Decompressing to /tmp...');
+            try {
+                const gzBuf = fs.readFileSync(gzPath);
+                const decompressedBuf = zlib.gunzipSync(gzBuf);
+                fs.writeFileSync(tmpDbPath, decompressedBuf);
+                console.log('[DB] Decompression complete. File size:', fs.statSync(tmpDbPath).size);
+                dbInstance = new sqlite3.Database(tmpDbPath, sqlite3.OPEN_READONLY);
+                return dbInstance;
+            } catch (e) {
+                console.error('[DB] Decompression error:', e.message);
+            }
         }
     }
 

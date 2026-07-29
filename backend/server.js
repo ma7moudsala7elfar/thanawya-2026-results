@@ -96,12 +96,12 @@ async function getSharedBrowser() {
         }
     }
 
-    // On Railway (Nixpacks), use system Chromium; locally use bundled Puppeteer Chrome
+    // Use env var (set in Docker/Railway) or let Puppeteer find its bundled Chrome
     const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
-    console.log('[Puppeteer] Launching Headless Chrome...', executablePath ? `(system: ${executablePath})` : '(bundled)');
+    console.log('[Puppeteer] Launching Chrome...', executablePath ? `(path: ${executablePath})` : '(auto)');
 
     sharedBrowser = await puppeteer.launch({
-        headless: 'new',
+        headless: true,
         executablePath,
         args: [
             '--no-sandbox',
@@ -110,8 +110,13 @@ async function getSharedBrowser() {
             '--disable-accelerated-2d-canvas',
             '--no-first-run',
             '--no-zygote',
-            '--single-process',
-            '--disable-gpu'
+            '--disable-gpu',
+            '--disable-background-networking',
+            '--disable-default-apps',
+            '--disable-extensions',
+            '--disable-sync',
+            '--disable-translate',
+            '--mute-audio'
         ]
     });
 

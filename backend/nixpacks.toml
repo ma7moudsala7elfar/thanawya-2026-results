@@ -1,0 +1,38 @@
+[phases.setup]
+nixPkgs = [
+  "chromium",
+  "nss",
+  "nspr",
+  "at-spi2-atk",
+  "cups",
+  "libdrm",
+  "dbus",
+  "libxkbcommon",
+  "xorg.libXcomposite",
+  "xorg.libXdamage",
+  "xorg.libXext",
+  "xorg.libXfixes",
+  "xorg.libXrandr",
+  "mesa",
+  "expat",
+  "xorg.libxcb",
+  "libxshmfence",
+  "xorg.libX11",
+  "xorg.libXrender",
+  "pango",
+  "cairo",
+  "alsa-lib",
+  "fontconfig",
+  "freetype",
+  "glib"
+]
+
+[phases.install]
+cmds = ["npm install", "npx puppeteer browsers install chrome"]
+
+[variables]
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "false"
+PUPPETEER_EXECUTABLE_PATH = ""
+
+[start]
+cmd = "node server.js"

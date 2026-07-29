@@ -80,9 +80,13 @@ async function getSharedBrowser() {
         }
     }
 
-    console.log('[Puppeteer] Launching new Headless Chrome...');
+    // On Railway (Nixpacks), use system Chromium; locally use bundled Puppeteer Chrome
+    const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
+    console.log('[Puppeteer] Launching Headless Chrome...', executablePath ? `(system: ${executablePath})` : '(bundled)');
+
     sharedBrowser = await puppeteer.launch({
         headless: 'new',
+        executablePath,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',

@@ -19,6 +19,7 @@ let dbInstance = null;
 function getDatabase() {
     if (dbInstance) return dbInstance;
 
+    // Priority 1: local dev DB (next to project root)
     const localDbPath = path.join(__dirname, '..', 'db', 'thanawya.db');
     if (fs.existsSync(localDbPath)) {
         console.log('[DB] Connected to local thanawya.db at:', localDbPath);
@@ -26,26 +27,41 @@ function getDatabase() {
         return dbInstance;
     }
 
+    // Priority 2: Already decompressed in /tmp
     const tmpDbPath = '/tmp/thanawya.db';
-    if (!fs.existsSync(tmpDbPath)) {
-        const gzPath = path.join(__dirname, '..', 'db', 'thanawya.db.gz');
-        if (fs.existsSync(gzPath)) {
-            console.log('[DB] Decompressing thanawya.db.gz to /tmp...');
+    if (fs.existsSync(tmpDbPath) && fs.statSync(tmpDbPath).size > 1024) {
+        console.log('[DB] Using cached DB at /tmp/thanawya.db');
+        dbInstance = new sqlite3.Database(tmpDbPath, sqlite3.OPEN_READONLY);
+        return dbInstance;
+    }
+
+    // Priority 3: Decompress .gz (Railway deployment)
+    const gzPath = path.join(__dirname, '..', 'db', 'thanawya.db.gz');
+    if (fs.existsSync(gzPath)) {
+        console.log('[DB] Decompressing thanawya.db.gz to /tmp...');
+        try {
             const decompressed = zlib.gunzipSync(fs.readFileSync(gzPath));
             fs.writeFileSync(tmpDbPath, decompressed);
             console.log('[DB] Done, size:', decompressed.length);
-        } else {
-            console.error('[DB] ERROR: No database file found!');
+            dbInstance = new sqlite3.Database(tmpDbPath, sqlite3.OPEN_READONLY);
+            return dbInstance;
+        } catch (e) {
+            console.error('[DB] Decompression failed:', e.message);
         }
-    } else {
-        console.log('[DB] Using cached DB at /tmp/thanawya.db');
     }
 
-    dbInstance = new sqlite3.Database(tmpDbPath, sqlite3.OPEN_READONLY, (err) => {
-        if (err) console.error('[DB] Connection error:', err.message);
-        else console.log('[DB] Connected to', tmpDbPath);
-    });
-
+    // Fallback: empty in-memory DB (returns empty results, not crash)
+    console.error('[DB] WARNING: No DB found — using in-memory empty DB');
+    dbInstance = new sqlite3.Database(':memory:');
+    dbInstance.run(`CREATE TABLE IF NOT EXISTS students (
+        seating_no INTEGER PRIMARY KEY,
+        student_name TEXT,
+        search_name TEXT,
+        total_score REAL,
+        max_score REAL,
+        percentage REAL,
+        status TEXT
+    )`);
     return dbInstance;
 }
 

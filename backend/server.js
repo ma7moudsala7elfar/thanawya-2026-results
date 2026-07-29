@@ -4,155 +4,286 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const zlib = require('zlib');
+const puppeteer = require('puppeteer');
 
 const app = express();
-const PORT = process.env.PORT || 5001;
+const PORT = process.env.PORT || 3001;
 
 app.use(cors());
 app.use(express.json());
 
+// ─── Database Setup ────────────────────────────────────────────────────────────
+
+let dbInstance = null;
+
 function getDatabase() {
-    const dbPath = path.join(__dirname, 'thanawya.db');
-    if (!fs.existsSync(dbPath)) {
-        const gzPath = path.join(__dirname, 'thanawya.db.gz');
-        if (fs.existsSync(gzPath)) {
-            console.log('Decompressing thanawya.db.gz to thanawya.db...');
-            const compressed = fs.readFileSync(gzPath);
-            const decompressed = zlib.gunzipSync(compressed);
-            fs.writeFileSync(dbPath, decompressed);
-            console.log('Decompressed database successfully!');
-        }
+    if (dbInstance) return dbInstance;
+
+    const localDbPath = path.join(__dirname, '..', 'db', 'thanawya.db');
+    if (fs.existsSync(localDbPath)) {
+        console.log('[DB] Connected to local thanawya.db at:', localDbPath);
+        dbInstance = new sqlite3.Database(localDbPath, sqlite3.OPEN_READONLY);
+        return dbInstance;
     }
-    return new sqlite3.Database(dbPath, sqlite3.OPEN_READONLY, (err) => {
-        if (err) {
-            console.error('Failed to connect to Thanawya SQLite DB:', err);
+
+    const tmpDbPath = '/tmp/thanawya.db';
+    if (!fs.existsSync(tmpDbPath)) {
+        const gzPath = path.join(__dirname, '..', 'db', 'thanawya.db.gz');
+        if (fs.existsSync(gzPath)) {
+            console.log('[DB] Decompressing thanawya.db.gz to /tmp...');
+            const decompressed = zlib.gunzipSync(fs.readFileSync(gzPath));
+            fs.writeFileSync(tmpDbPath, decompressed);
+            console.log('[DB] Done, size:', decompressed.length);
         } else {
-            console.log('Connected to Thanawya SQLite DB successfully at:', dbPath);
+            console.error('[DB] ERROR: No database file found!');
         }
+    } else {
+        console.log('[DB] Using cached DB at /tmp/thanawya.db');
+    }
+
+    dbInstance = new sqlite3.Database(tmpDbPath, sqlite3.OPEN_READONLY, (err) => {
+        if (err) console.error('[DB] Connection error:', err.message);
+        else console.log('[DB] Connected to', tmpDbPath);
     });
+
+    return dbInstance;
 }
 
 const db = getDatabase();
 
-// Arabic text normalizer matching Python logic
+// ─── Arabic Normalization ──────────────────────────────────────────────────────
+
 function normalizeArabic(text) {
-    if (!text) return "";
-    let str = String(text).trim();
-    str = str.replace(/[\u064B-\u0652]/g, "");
-    str = str.replace(/[أإآا]/g, "ا");
-    str = str.replace(/ى/g, "ي");
-    str = str.replace(/ة/g, "ه");
-    str = str.replace(/\s+/g, " ");
-    return str.toLowerCase();
+    if (!text) return '';
+    return String(text)
+        .trim()
+        .replace(/[\u064B-\u0652]/g, '')
+        .replace(/[أإآا]/g, 'ا')
+        .replace(/ى/g, 'ي')
+        .replace(/ة/g, 'ه')
+        .replace(/\s+/g, ' ')
+        .toLowerCase();
 }
 
-// Search Endpoint (By Seat Number or Name)
+// ─── Puppeteer Shared Browser ─────────────────────────────────────────────────
+
+const liveSubjectCache = new Map();
+let sharedBrowser = null;
+
+async function getSharedBrowser() {
+    if (sharedBrowser) {
+        try {
+            const pages = await sharedBrowser.pages();
+            if (pages) return sharedBrowser;
+        } catch (_) {
+            sharedBrowser = null;
+        }
+    }
+
+    console.log('[Puppeteer] Launching new Headless Chrome...');
+    sharedBrowser = await puppeteer.launch({
+        headless: 'new',
+        args: [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu'
+        ]
+    });
+
+    sharedBrowser.on('disconnected', () => {
+        console.log('[Puppeteer] Browser disconnected, will restart on next request.');
+        sharedBrowser = null;
+    });
+
+    return sharedBrowser;
+}
+
+// ─── Real-Time Headless Scraper from Gomhuria Online ─────────────────────────
+
+async function scrapeGomhuriaOnline(seatingNo) {
+    const key = String(seatingNo);
+
+    if (liveSubjectCache.has(key)) {
+        console.log(`[Scraper] Cache hit for ${key}`);
+        return liveSubjectCache.get(key);
+    }
+
+    try {
+        const browser = await getSharedBrowser();
+        const page = await browser.newPage();
+
+        await page.setUserAgent(
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        );
+
+        console.log(`[Scraper] Opening Gomhuria for seating_no: ${key}...`);
+        await page.goto('https://natega.gomhuriaonline.com', {
+            waitUntil: 'networkidle2',
+            timeout: 30000
+        });
+
+        await page.waitForSelector('#seat-number', { timeout: 10000 });
+        await page.type('#seat-number', key);
+
+        await Promise.all([
+            page.waitForNavigation({ waitUntil: 'networkidle2', timeout: 30000 }).catch(() => {}),
+            page.click('.inquiry-form__submit')
+        ]);
+
+        const html = await page.content();
+        await page.close();
+
+        // Parse table rows from student-result__table
+        const rowRegex = /<tr>\s*<td>([\s\S]*?)<\/td>\s*<td>([\s\S]*?)<\/td>\s*<td>([\s\S]*?)<\/td>\s*<\/tr>/gi;
+        const parsedSubjects = [];
+        let match;
+
+        while ((match = rowRegex.exec(html)) !== null) {
+            const name = match[1].replace(/<[^>]+>/g, '').trim();
+            const score = match[2].replace(/<[^>]+>/g, '').trim();
+            const perc = match[3].replace(/<[^>]+>/g, '').trim();
+
+            if (name && name !== 'المادة') {
+                parsedSubjects.push({
+                    name,
+                    score,
+                    percentage: perc,
+                    isEnrolled: !score.includes('غير مقرر')
+                });
+            }
+        }
+
+        if (parsedSubjects.length > 0) {
+            console.log(`[Scraper] ✅ Got ${parsedSubjects.length} subjects for ${key}`);
+            liveSubjectCache.set(key, parsedSubjects);
+            return parsedSubjects;
+        }
+
+        console.warn(`[Scraper] ⚠️ No subjects found in HTML for ${key}`);
+        return null;
+
+    } catch (err) {
+        console.error(`[Scraper] ❌ Error for ${key}:`, err.message);
+        return null;
+    }
+}
+
+// ─── API Routes ───────────────────────────────────────────────────────────────
+
+app.get('/api/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 app.get('/api/search', (req, res) => {
     const query = (req.query.q || '').trim();
     const page = parseInt(req.query.page) || 1;
     const limit = Math.min(parseInt(req.query.limit) || 20, 100);
     const offset = (page - 1) * limit;
 
-    if (!query) {
-        return res.json({ total: 0, page, limit, results: [] });
-    }
+    if (!query) return res.json({ total: 0, page, limit, results: [] });
 
     const isNumeric = /^\d+$/.test(query);
 
     if (isNumeric) {
         const seatNo = parseInt(query, 10);
-        const countSql = `SELECT COUNT(*) AS total FROM students WHERE seating_no = ? OR seating_no LIKE ?`;
-        const selectSql = `SELECT seating_no, student_name, total_score, max_score, percentage, status FROM students WHERE seating_no = ? OR seating_no LIKE ? ORDER BY seating_no ASC LIMIT ? OFFSET ?`;
         const seatPattern = `${query}%`;
-
-        db.get(countSql, [seatNo, seatPattern], (err, countRow) => {
-            if (err) return res.status(500).json({ error: err.message });
-
-            db.all(selectSql, [seatNo, seatPattern, limit, offset], (err, rows) => {
+        db.get(
+            `SELECT COUNT(*) AS total FROM students WHERE seating_no = ? OR seating_no LIKE ?`,
+            [seatNo, seatPattern],
+            (err, countRow) => {
                 if (err) return res.status(500).json({ error: err.message });
-                res.json({
-                    total: countRow ? countRow.total : 0,
-                    page,
-                    limit,
-                    results: rows || []
-                });
-            });
-        });
+                db.all(
+                    `SELECT seating_no, student_name, total_score, max_score, percentage, status FROM students WHERE seating_no = ? OR seating_no LIKE ? ORDER BY seating_no ASC LIMIT ? OFFSET ?`,
+                    [seatNo, seatPattern, limit, offset],
+                    (err, rows) => {
+                        if (err) return res.status(500).json({ error: err.message });
+                        res.json({ total: countRow?.total || 0, page, limit, results: rows || [] });
+                    }
+                );
+            }
+        );
     } else {
-        const normalizedQuery = normalizeArabic(query);
-        const searchPattern = `%${normalizedQuery}%`;
-
-        const countSql = `SELECT COUNT(*) AS total FROM students WHERE search_name LIKE ?`;
-        const selectSql = `SELECT seating_no, student_name, total_score, max_score, percentage, status FROM students WHERE search_name LIKE ? ORDER BY total_score DESC LIMIT ? OFFSET ?`;
-
-        db.get(countSql, [searchPattern], (err, countRow) => {
-            if (err) return res.status(500).json({ error: err.message });
-
-            db.all(selectSql, [searchPattern, limit, offset], (err, rows) => {
+        const pattern = `%${normalizeArabic(query)}%`;
+        db.get(
+            `SELECT COUNT(*) AS total FROM students WHERE search_name LIKE ?`,
+            [pattern],
+            (err, countRow) => {
                 if (err) return res.status(500).json({ error: err.message });
-                res.json({
-                    total: countRow ? countRow.total : 0,
-                    page,
-                    limit,
-                    results: rows || []
-                });
-            });
-        });
+                db.all(
+                    `SELECT seating_no, student_name, total_score, max_score, percentage, status FROM students WHERE search_name LIKE ? ORDER BY total_score DESC LIMIT ? OFFSET ?`,
+                    [pattern, limit, offset],
+                    (err, rows) => {
+                        if (err) return res.status(500).json({ error: err.message });
+                        res.json({ total: countRow?.total || 0, page, limit, results: rows || [] });
+                    }
+                );
+            }
+        );
     }
 });
 
-// Single Student Detail with Rank & Percentile
-app.get('/api/student/:seating_no', (req, res) => {
+app.get('/api/student/:seating_no', async (req, res) => {
     const seatingNo = parseInt(req.params.seating_no, 10);
-    if (isNaN(seatingNo)) {
-        return res.status(400).json({ error: 'رقم الجلوس غير صحيح' });
-    }
+    if (isNaN(seatingNo)) return res.status(400).json({ error: 'رقم الجلوس غير صحيح' });
 
-    const studentSql = `SELECT seating_no, student_name, total_score, max_score, percentage, status FROM students WHERE seating_no = ?`;
+    db.get(
+        `SELECT seating_no, student_name, total_score, max_score, percentage, status FROM students WHERE seating_no = ?`,
+        [seatingNo],
+        async (err, student) => {
+            if (err) return res.status(500).json({ error: err.message });
+            if (!student) return res.status(404).json({ error: 'لم يتم العثور على طالب برقم الجلوس هذا' });
 
-    db.get(studentSql, [seatingNo], (err, student) => {
-        if (err) return res.status(500).json({ error: err.message });
-        if (!student) return res.status(404).json({ error: 'لم يتم العثور على طالب برقم الجلوس هذا' });
+            // Scrape real subject grades from Gomhuria Online
+            let subjects = null;
+            try {
+                subjects = await scrapeGomhuriaOnline(seatingNo);
+            } catch (e) {
+                console.error('[Route] Scrape error:', e.message);
+            }
 
-        const rankSql = `SELECT COUNT(*) + 1 AS rank FROM students WHERE total_score > ?`;
-        const lowerCountSql = `SELECT COUNT(*) AS lower_count FROM students WHERE total_score < ?`;
-        const totalCountSql = `SELECT COUNT(*) AS total_students FROM students`;
+            db.get(`SELECT COUNT(*) + 1 AS rank FROM students WHERE total_score > ?`, [student.total_score], (err, rankRow) => {
+                db.get(`SELECT COUNT(*) AS lower_count FROM students WHERE total_score < ?`, [student.total_score], (err, lowerRow) => {
+                    db.get(`SELECT COUNT(*) AS total_students FROM students`, [], (err, totalRow) => {
+                        const totalStudents = totalRow?.total_students || 919396;
+                        const rank = rankRow?.rank || 1;
+                        const lowerCount = lowerRow?.lower_count || 0;
+                        const percentile = Number(((lowerCount / totalStudents) * 100).toFixed(2));
 
-        db.get(rankSql, [student.total_score], (err, rankRow) => {
-            db.get(lowerCountSql, [student.total_score], (err, lowerRow) => {
-                db.get(totalCountSql, [], (err, totalRow) => {
-                    const totalStudents = totalRow ? totalRow.total_students : 919396;
-                    const rank = rankRow ? rankRow.rank : 1;
-                    const lowerCount = lowerRow ? lowerRow.lower_count : 0;
-                    const percentile = Number(((lowerCount / totalStudents) * 100).toFixed(2));
-
-                    res.json({
-                        ...student,
-                        national_rank: rank,
-                        percentile: percentile,
-                        total_students: totalStudents
+                        res.json({
+                            ...student,
+                            national_rank: rank,
+                            percentile,
+                            total_students: totalStudents,
+                            subjects: subjects || [],
+                            is_live_scraped: subjects !== null && subjects.length > 0
+                        });
                     });
                 });
             });
-        });
-    });
+        }
+    );
 });
 
-// Top Students Leaderboard
 app.get('/api/top-students', (req, res) => {
     const limit = Math.min(parseInt(req.query.limit) || 50, 100);
-    const sql = `SELECT seating_no, student_name, total_score, max_score, percentage, status FROM students ORDER BY total_score DESC, seating_no ASC LIMIT ?`;
-
-    db.all(sql, [limit], (err, rows) => {
-        if (err) return res.status(500).json({ error: err.message });
-        res.json({ results: rows || [] });
-    });
+    db.all(
+        `SELECT seating_no, student_name, total_score, max_score, percentage, status FROM students ORDER BY total_score DESC, seating_no ASC LIMIT ?`,
+        [limit],
+        (err, rows) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({ results: rows || [] });
+        }
+    );
 });
 
-// Overall Statistics
 app.get('/api/stats', (req, res) => {
-    const statsSql = `
-        SELECT
+    db.get(
+        `SELECT
             COUNT(*) as total_students,
             SUM(CASE WHEN status LIKE '%ناجح%' THEN 1 ELSE 0 END) as passed_students,
             SUM(CASE WHEN status LIKE '%ثان%' THEN 1 ELSE 0 END) as second_round_students,
@@ -166,20 +297,22 @@ app.get('/api/stats', (req, res) => {
             SUM(CASE WHEN percentage >= 60 AND percentage < 70 THEN 1 ELSE 0 END) as range_60_70,
             SUM(CASE WHEN percentage >= 50 AND percentage < 60 THEN 1 ELSE 0 END) as range_50_60,
             SUM(CASE WHEN percentage < 50 THEN 1 ELSE 0 END) as range_below_50
-        FROM students
-    `;
-
-    db.get(statsSql, [], (err, row) => {
-        if (err) return res.status(500).json({ error: err.message });
-        const passRate = row ? Number(((row.passed_students / row.total_students) * 100).toFixed(2)) : 0;
-        res.json({
-            ...row,
-            avg_score: Number((row.avg_score || 0).toFixed(2)),
-            pass_rate: passRate
-        });
-    });
+        FROM students`,
+        [],
+        (err, row) => {
+            if (err) return res.status(500).json({ error: err.message });
+            res.json({
+                ...row,
+                avg_score: Number((row.avg_score || 0).toFixed(2)),
+                pass_rate: Number(((row.passed_students / row.total_students) * 100).toFixed(2))
+            });
+        }
+    );
 });
 
+// ─── Start Server ─────────────────────────────────────────────────────────────
+
 app.listen(PORT, () => {
-    console.log(`Thanawya Results Backend running on http://localhost:${PORT}`);
+    console.log(`[Server] 🚀 Thanawya Backend running on port ${PORT}`);
+    console.log(`[Server] Health check: http://localhost:${PORT}/api/health`);
 });

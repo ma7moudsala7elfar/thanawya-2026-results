@@ -4,7 +4,7 @@ const sqlite3 = require('sqlite3').verbose();
 const path = require('path');
 const fs = require('fs');
 const zlib = require('zlib');
-const puppeteer = require('puppeteer');
+// puppeteer loaded via dynamic import() — it's ESM-only in v19+
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -99,6 +99,9 @@ async function getSharedBrowser() {
     // Use env var (set in Docker/Railway) or let Puppeteer find its bundled Chrome
     const executablePath = process.env.PUPPETEER_EXECUTABLE_PATH || undefined;
     console.log('[Puppeteer] Launching Chrome...', executablePath ? `(path: ${executablePath})` : '(auto)');
+
+    // Dynamic import for ESM-only puppeteer v19+
+    const { default: puppeteer } = await import('puppeteer');
 
     sharedBrowser = await puppeteer.launch({
         headless: true,

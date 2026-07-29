@@ -16,10 +16,10 @@ app.use(express.json());
 
 let dbInstance = null;
 
-function getDatabase() {
+function initDatabase() {
     if (dbInstance) return dbInstance;
 
-    // Priority 1: local dev DB (next to project root)
+    // Priority 1: local dev DB
     const localDbPath = path.join(__dirname, '..', 'db', 'thanawya.db');
     if (fs.existsSync(localDbPath)) {
         console.log('[DB] Connected to local thanawya.db at:', localDbPath);
@@ -35,18 +35,18 @@ function getDatabase() {
         return dbInstance;
     }
 
-    // Priority 3: Decompress .gz (Railway deployment)
+    // Priority 3: Decompress .gz via stream (avoids RAM OOM on 512MB Railway instances)
     const gzPath = path.join(__dirname, '..', 'db', 'thanawya.db.gz');
     if (fs.existsSync(gzPath)) {
-        console.log('[DB] Decompressing thanawya.db.gz to /tmp...');
+        console.log('[DB] Streaming decompress thanawya.db.gz to /tmp...');
         try {
-            const decompressed = zlib.gunzipSync(fs.readFileSync(gzPath));
-            fs.writeFileSync(tmpDbPath, decompressed);
-            console.log('[DB] Done, size:', decompressed.length);
+            const { execSync } = require('child_process');
+            execSync(`gzip -d -c "${gzPath}" > "${tmpDbPath}"`);
+            console.log('[DB] Stream decompression complete. File size:', fs.statSync(tmpDbPath).size);
             dbInstance = new sqlite3.Database(tmpDbPath, sqlite3.OPEN_READONLY);
             return dbInstance;
         } catch (e) {
-            console.error('[DB] Decompression failed:', e.message);
+            console.error('[DB] Stream decompression failed:', e.message);
         }
     }
 
@@ -65,7 +65,7 @@ function getDatabase() {
     return dbInstance;
 }
 
-const db = getDatabase();
+const db = initDatabase();
 
 // ─── Arabic Normalization ──────────────────────────────────────────────────────
 

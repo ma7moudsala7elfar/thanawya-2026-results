@@ -14,7 +14,7 @@ const zlib = require('zlib');
 // puppeteer loaded via dynamic import() — it's ESM-only in v19+
 
 const app = express();
-const PORT = process.env.PORT || 3001;
+const PORT = process.env.PORT || 3000;
 
 app.use(cors());
 app.use(express.json());
